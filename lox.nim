@@ -1,17 +1,21 @@
 import 
   std/os,
   error,
+  ast,
   scanner,
   token
 
 proc run(source: string) =
-  let scanner = newScanner(source)
-  let tokens: seq[Token] = scanner.scanTokens()
+  let 
+    scanner = newScanner(source)
+    tokens: seq[Token] = scanner.scanTokens()
+    parser = newParser(tokens)
+    expression = parser.parse()
 
-  for token in tokens:
-    echo token
+  if hadError: return
 
-  echo "running"
+  echo expression
+
 
 proc runPrompt() =
   while true:

@@ -25,13 +25,15 @@ type
   LoxObjectKind* = enum
     lokNumber,
     lokNil,
-    lokString
+    lokString,
+    lokBool
 
   LoxObject* = ref object
     case kind*: LoxObjectKind
     of lokNil: nilValue*: string
     of lokString: stringValue*: string
     of lokNumber: numberValue*: float
+    of lokBool: boolValue*: bool
 
   Token* = object
     kind*: TokenKind
@@ -44,8 +46,14 @@ proc `$`*(self: LoxObject): string =
   of lokNumber: $self.numberValue
   of lokNil: "nil"
   of lokString: self.stringValue
+  of lokBool: $self.boolValue
 
 proc `$`*(self: Token): string =
-  fmt"{self.kind} {self.lexeme} {self.literal}"
+  if self.literal != nil:
+    $self.literal
+  elif self.lexeme != "":
+    $self.lexeme
+  else:
+    "nil"
 
 
