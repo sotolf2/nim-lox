@@ -4,12 +4,15 @@ import
 
 var
   hadError* = false
+  hadRuntimeError* = false
 
-type ParseException* = object of CatchableError
+type 
+  ParseException* = object of CatchableError
+  RuntimeException* = object of CatchableError
 
 proc report(line: int, where, message: string) =
   stdErr.writeLine(fmt"[Line {line}] Error {where}: {message}")
-  hadError = true;
+  hadError = true
 
 proc error*(token: Token, message: string)=
   if token.kind == Eof:
@@ -20,3 +23,6 @@ proc error*(token: Token, message: string)=
 proc loxError*(line: int, message: string) =
   report(line, "", message)
 
+proc runtimeError*(message: string) =
+  stdErr.writeLine(message)
+  hadRuntimeError = true

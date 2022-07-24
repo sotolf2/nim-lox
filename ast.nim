@@ -12,18 +12,18 @@ type
     Unary
 
   Expression* = ref object
-    case kind: ExpressionKind
+    case kind*: ExpressionKind
     of Binary:
-      left: Expression
-      operator: Token
-      right: Expression
+      left*: Expression
+      operator*: Token
+      right*: Expression
     of Grouping:
-      expr: Expression
+      expr*: Expression
     of Literal:
-      value: LoxObject
+      value*: LoxObject
     of Unary:
-      uOperator: Token
-      uRight: Expression
+      uOperator*: Token
+      uRight*: Expression
 
 proc `$`*(self: Expression): string =
   case self.kind

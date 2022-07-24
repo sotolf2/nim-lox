@@ -1,7 +1,8 @@
 import 
   std/os,
-  error,
   ast,
+  error,
+  interpreter,
   scanner,
   token
 
@@ -14,7 +15,8 @@ proc run(source: string) =
 
   if hadError: return
 
-  echo expression
+  #echo expression
+  expression.interpret()
 
 
 proc runPrompt() =
@@ -32,6 +34,8 @@ proc runFile(file: string) =
   lines.run()
   if hadError:
     quit(65)
+  if hadRuntimeError:
+    quit(70)
   quit(0)
 
 if isMainModule:

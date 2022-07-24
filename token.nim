@@ -1,5 +1,5 @@
 import
-  std/strformat
+  std/strutils
 
 type 
   TokenKind* = enum
@@ -43,7 +43,12 @@ type
 
 proc `$`*(self: LoxObject): string =
   case self.kind
-  of lokNumber: $self.numberValue
+  of lokNumber:
+    let strnum = $self.numberValue
+    if strnum.endsWith(".0"):
+      strnum[0..^3]
+    else:
+      strnum
   of lokNil: "nil"
   of lokString: self.stringValue
   of lokBool: $self.boolValue
