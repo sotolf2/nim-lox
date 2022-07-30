@@ -9,7 +9,8 @@ type
     Binary,
     Grouping,
     Literal,
-    Unary
+    Unary,
+    Variable
 
   Expression* = ref object
     case kind*: ExpressionKind
@@ -24,6 +25,27 @@ type
     of Unary:
       uOperator*: Token
       uRight*: Expression
+    of Variable:
+      name*: Token
+
+  StatementKind* = enum
+    skExpression,
+    skPrint,
+    skVar
+
+  Statement* = ref object
+    case kind*: StatementKind
+    of skExpression:
+      expr*: Expression
+    of skPrint:
+      pexpr*: Expression
+    of skVar:
+      name*: Token
+      initialiser*: Expression 
+
+  Parser = ref object
+    tokens: seq[Token]
+    current: int
 
 proc `$`*(self: Expression): string =
   case self.kind
@@ -31,12 +53,13 @@ proc `$`*(self: Expression): string =
   of Grouping: fmt"(group {self.expr})"
   of Literal: fmt"{self.value}"
   of Unary: fmt"({self.uOperator.lexeme} {self.uRight})"
+  of Variable: $self.name
 
-
-type
-  Parser = ref object
-    tokens: seq[Token]
-    current: int
+proc `$`*(self: Statement): string =
+  case self.kind:
+  of skPrint: fmt"(print {self.pexpr})"
+  of skExpression: $self.expr
+  of skVar: fmt"(var {self.name} {self.initialiser})"
 
 proc newParser*(tokens: seq[Token]): Parser =
   result = new(Parser)
@@ -71,10 +94,19 @@ proc match(self: Parser, kinds: varargs[TokenKind]): bool =
 proc consume(self: Parser, kind: TokenKind, message: string) =
   if self.check(kind):
     self.advance()
+    return
 
   error(self.peek, message)
   raise newException(ParseException, message)
 
+proc consumerReturnToken(self: Parser, kind: TokenKind, message: string): Token =
+  if self.check(kind):
+    result = self.tokens[self.current]
+    self.advance()
+    return
+
+  error(self.peek, message)
+  raise newException(ParseException, message)
 
 proc syncronise(self: Parser) =
   self.advance()
@@ -101,6 +133,9 @@ proc primary(self: Parser): Expression =
 
   if self.match(Number, String):
     return Expression(kind: Literal, value: self.previous.literal)
+
+  if self.match(Identifier):
+    return Expression(kind: Variable, name: self.previous)
 
   if self.match(LeftParen):
     let expr = self.expression()
@@ -158,30 +193,42 @@ proc equality(self: Parser): Expression =
 proc expression(self: Parser): Expression =
   equality(self)
 
-proc parse*(self: Parser): Expression =
+proc printStatement(self: Parser): Statement =
+  let value = self.expression()
+  self.consume(Semicolon, "Expect ; after value.")
+  Statement(kind: skPrint, pexpr: value)
+
+proc expressionStatement(self: Parser): Statement =
+  let value = self.expression()
+  self.consume(Semicolon, "Expect ; after value.")
+  Statement(kind: skExpression, expr: value)
+
+proc statement(self: Parser): Statement =
+  if self.match(Print):
+    return self.printStatement()
+  self.expressionStatement()
+
+proc varDeclaration(self: Parser): Statement =
+  let name = self.consumerReturnToken(Identifier, "Expect variable name")
+
+  var initialiser: Expression
+  if self.match(Equal):
+    initialiser = self.expression()
+  self.consume(Semicolon, "Expect ; after variable declaration")
+  return Statement(kind: skVar, name: name, initialiser: initialiser)
+
+proc declaration(self: Parser): Statement =
   try:
-    return self.expression
+    if self.match(Var):
+      return self.varDeclaration
+    return self.statement()
   except ParseException:
+    self.syncronise()
     return nil
 
-if isMainModule:
-  let tree = Expression(
-    kind: Binary,
-    left: Expression(
-      kind: Unary,
-      uOperator: Token(kind: Minus, lexeme: "-", literal: nil, line: 1),
-      uRight: Expression(
-        kind: Literal,
-        value: LoxObject(kind: lokNumber, numberValue: 123)
-      )
-    ),
-    operator: Token(kind: Star, lexeme: "*", literal: nil, line: 1),
-    right: Expression(
-      kind: Grouping,
-      expr: Expression(
-        kind: Literal,
-        value: LoxObject(kind: lokNumber, numberValue: 45.67)
-      )
-    )
-  )
-  echo tree
+proc parse*(self: Parser): seq[Statement] =
+  while not self.isAtEnd:
+    result.add(self.declaration())
+
+         
+

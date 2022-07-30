@@ -59,6 +59,6 @@ proc `$`*(self: Token): string =
   elif self.lexeme != "":
     $self.lexeme
   else:
-    "nil"
+    $self.kind
 
 

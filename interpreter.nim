@@ -1,8 +1,27 @@
 import
+  std/tables,
   std/strformat,
   ast,
   error,
   token
+
+type
+  Environment = ref object
+    values: Table[string, LoxObject]
+
+proc newEnvironment(): Environment =
+  Environment(values: initTable[string, LoxObject]())
+
+proc define(self: Environment, name: string, value: LoxObject) =
+  self.values[name] = value
+
+proc get(self: Environment, name: Token): LoxObject =
+  if self.values.hasKey(name.lexeme):
+    return self.values[name.lexeme]
+
+  raise newException(RuntimeException, fmt"Undefined variable: {name.lexeme}")
+
+let environment = newEnvironment()
 
 proc isTruthy(self: LoxObject): bool =
   if self.kind == lokNil: return false
@@ -46,6 +65,8 @@ proc evaluate(self: Expression): LoxObject =
       return LoxObject(kind: lokBool, boolValue: not right.isTruthy())
     else:
       return LoxObject(kind: lokNil, nilValue: "nil")
+  of Variable:
+    return environment.get(self.name)
   of Binary:
     let
       left = self.left.evaluate()
@@ -86,10 +107,22 @@ proc evaluate(self: Expression): LoxObject =
       else:
         assert(false, "evaluate operator binary -- not reachable")
 
-proc interpret*(expr: Expression) =
+proc execute(self: Statement) =
+  case self.kind
+  of skPrint:
+    echo self.pexpr.evaluate()
+  of skExpression:
+    discard self.expr.evaluate()
+  of skVar:
+    var value: LoxObject
+    if not(self.initialiser == nil):
+      value = self.initialiser.evaluate()
+    environment.define(self.name.lexeme, value)
+
+proc interpret*(statements: seq[Statement]) =
   try:
-    let value = expr.evaluate()
-    echo value
+    for statement in statements:
+      statement.execute()
   except RuntimeException:
     runtimeError(getCurrentExceptionMsg())
 

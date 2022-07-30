@@ -11,12 +11,12 @@ proc run(source: string) =
     scanner = newScanner(source)
     tokens: seq[Token] = scanner.scanTokens()
     parser = newParser(tokens)
-    expression = parser.parse()
+    statements = parser.parse()
 
   if hadError: return
 
   #echo expression
-  expression.interpret()
+  interpret(statements)
 
 
 proc runPrompt() =
