@@ -6,6 +6,7 @@ import
 
 type
   ExpressionKind* = enum
+    Assign,
     Binary,
     Grouping,
     Literal,
@@ -27,14 +28,20 @@ type
       uRight*: Expression
     of Variable:
       name*: Token
+    of Assign:
+      aName*: Token
+      aValue*: Expression
 
   StatementKind* = enum
+    skBlock,
     skExpression,
     skPrint,
     skVar
 
   Statement* = ref object
     case kind*: StatementKind
+    of skBlock:
+      statements*: seq[Statement]
     of skExpression:
       expr*: Expression
     of skPrint:
@@ -54,9 +61,11 @@ proc `$`*(self: Expression): string =
   of Literal: fmt"{self.value}"
   of Unary: fmt"({self.uOperator.lexeme} {self.uRight})"
   of Variable: $self.name
+  of Assign: fmt"(assign {self.aName} {self.aValue})"
 
 proc `$`*(self: Statement): string =
   case self.kind:
+  of skBlock: fmt"(block [{self.statements}])"
   of skPrint: fmt"(print {self.pexpr})"
   of skExpression: $self.expr
   of skVar: fmt"(var {self.name} {self.initialiser})"
@@ -119,6 +128,9 @@ proc syncronise(self: Parser) =
     of Class, Fun, Var, For, If, While, Print, Return:
       return
     else: self.advance()
+
+  
+
 
 # Forward decalration because we have to recurse 
 proc expression(self: Parser): Expression 
@@ -190,8 +202,25 @@ proc equality(self: Parser): Expression =
       right = comparison(self)
     result = Expression(kind: Binary, left: result, operator: operator, right: right)
 
+proc assignment(self: Parser): Expression =
+  let expr = self.equality()
+
+  if self.match(Equal):
+    let 
+      equals = self.previous()
+      value = self.assignment()
+
+    if expr.kind == Variable:
+      let name = expr.name
+      return Expression(kind: Assign, aName: name, aValue: value)
+
+    error(equals, "Invalid assignment target")
+
+  return expr
+
+
 proc expression(self: Parser): Expression =
-  equality(self)
+  self.assignment()
 
 proc printStatement(self: Parser): Statement =
   let value = self.expression()
@@ -203,9 +232,21 @@ proc expressionStatement(self: Parser): Statement =
   self.consume(Semicolon, "Expect ; after value.")
   Statement(kind: skExpression, expr: value)
 
+proc declaration(self: Parser): Statement
+
+proc blockStatement(self: Parser): Statement =
+  var statements: seq[Statement]
+  while (not self.check(RightBrace)) and (not self.isAtEnd()):
+    statements.add(self.declaration())
+
+  self.consume(RightBrace, "Expect } after block")
+  return Statement(kind:skBlock, statements: statements)
+
 proc statement(self: Parser): Statement =
   if self.match(Print):
     return self.printStatement()
+  if self.match(LeftBrace):
+    return self.blockStatement()
   self.expressionStatement()
 
 proc varDeclaration(self: Parser): Statement =

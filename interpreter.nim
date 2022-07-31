@@ -7,10 +7,14 @@ import
 
 type
   Environment = ref object
+    enclosing: Environment
     values: Table[string, LoxObject]
 
 proc newEnvironment(): Environment =
-  Environment(values: initTable[string, LoxObject]())
+  Environment(enclosing: nil, values: initTable[string, LoxObject]())
+
+proc newEnvironment(enclosing: Environment): Environment =
+  Environment(enclosing: enclosing, values: initTable[string, LoxObject]())
 
 proc define(self: Environment, name: string, value: LoxObject) =
   self.values[name] = value
@@ -19,9 +23,23 @@ proc get(self: Environment, name: Token): LoxObject =
   if self.values.hasKey(name.lexeme):
     return self.values[name.lexeme]
 
+  if not self.enclosing.isNil():
+    return self.enclosing.get(name)
+
   raise newException(RuntimeException, fmt"Undefined variable: {name.lexeme}")
 
-let environment = newEnvironment()
+proc assign(self: Environment, name: Token, value: LoxObject) =
+  if self.values.hasKey(name.lexeme):
+    self.values[name.lexeme] = value
+    return
+  
+  if not self.enclosing.isNil():
+    self.enclosing.assign(name, value)
+    return
+
+  raise newException(RuntimeException, fmt"Undefined variable: {name.lexeme}")
+
+var environment = newEnvironment()
 
 proc isTruthy(self: LoxObject): bool =
   if self.kind == lokNil: return false
@@ -67,6 +85,9 @@ proc evaluate(self: Expression): LoxObject =
       return LoxObject(kind: lokNil, nilValue: "nil")
   of Variable:
     return environment.get(self.name)
+  of Assign:
+    let value = evaluate(self.aValue)
+    environment.assign(self.aName, value)
   of Binary:
     let
       left = self.left.evaluate()
@@ -107,8 +128,22 @@ proc evaluate(self: Expression): LoxObject =
       else:
         assert(false, "evaluate operator binary -- not reachable")
 
+proc execute(self: Statement)
+
+proc executeBlock(statements: seq[Statement], env: Environment) =
+  let prev = environment
+  try:
+    environment = env
+    for statement in statements:
+      statement.execute()
+  finally:
+    environment = prev
+
+
 proc execute(self: Statement) =
   case self.kind
+  of skBlock:
+    executeBlock(self.statements, newEnvironment(environment))
   of skPrint:
     echo self.pexpr.evaluate()
   of skExpression:
