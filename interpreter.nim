@@ -88,6 +88,15 @@ proc evaluate(self: Expression): LoxObject =
   of Assign:
     let value = evaluate(self.aValue)
     environment.assign(self.aName, value)
+  of Logical:
+    let left = evaluate(self.lleft)
+
+    if self.loperator.kind == Or:
+      if left.isTruthy(): return left
+    else:
+      if not left.isTruthy(): return left
+
+    return evaluate(self.lright)
   of Binary:
     let
       left = self.left.evaluate()
@@ -153,6 +162,14 @@ proc execute(self: Statement) =
     if not(self.initialiser == nil):
       value = self.initialiser.evaluate()
     environment.define(self.name.lexeme, value)
+  of skIf:
+    if evaluate(self.condition).isTruthy():
+      execute(self.thenBranch)
+    elif not self.elseBranch.isNil():
+      execute(self.elseBranch)
+  of skWhile:
+    while evaluate(self.wcondition).isTruthy():
+      execute(self.wbody)
 
 proc interpret*(statements: seq[Statement]) =
   try:

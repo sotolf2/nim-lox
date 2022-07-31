@@ -10,6 +10,7 @@ type
     Binary,
     Grouping,
     Literal,
+    Logical,
     Unary,
     Variable
 
@@ -23,6 +24,10 @@ type
       expr*: Expression
     of Literal:
       value*: LoxObject
+    of Logical:
+      lleft*: Expression
+      loperator*: Token
+      lright*: Expression
     of Unary:
       uOperator*: Token
       uRight*: Expression
@@ -35,8 +40,10 @@ type
   StatementKind* = enum
     skBlock,
     skExpression,
+    skIf,
     skPrint,
-    skVar
+    skVar,
+    skWhile
 
   Statement* = ref object
     case kind*: StatementKind
@@ -44,11 +51,18 @@ type
       statements*: seq[Statement]
     of skExpression:
       expr*: Expression
+    of skIf:
+      condition*: Expression
+      thenBranch*: Statement
+      elseBranch*: Statement
     of skPrint:
       pexpr*: Expression
     of skVar:
       name*: Token
       initialiser*: Expression 
+    of skWhile:
+      wcondition*: Expression
+      wbody*: Statement
 
   Parser = ref object
     tokens: seq[Token]
@@ -59,6 +73,7 @@ proc `$`*(self: Expression): string =
   of Binary: fmt"({self.operator.lexeme} {self.left} {self.right})"
   of Grouping: fmt"(group {self.expr})"
   of Literal: fmt"{self.value}"
+  of Logical: fmt"({self.loperator.lexeme} {self.lleft} {self.lright})"
   of Unary: fmt"({self.uOperator.lexeme} {self.uRight})"
   of Variable: $self.name
   of Assign: fmt"(assign {self.aName} {self.aValue})"
@@ -69,6 +84,8 @@ proc `$`*(self: Statement): string =
   of skPrint: fmt"(print {self.pexpr})"
   of skExpression: $self.expr
   of skVar: fmt"(var {self.name} {self.initialiser})"
+  of skIf: fmt"(if {self.condition} {self.thenBranch} {self.elseBranch})"
+  of skWhile: fmt"(while {self.wcondition} {self.wbody})"
 
 proc newParser*(tokens: seq[Token]): Parser =
   result = new(Parser)
@@ -202,8 +219,30 @@ proc equality(self: Parser): Expression =
       right = comparison(self)
     result = Expression(kind: Binary, left: result, operator: operator, right: right)
 
+proc land(self: Parser): Expression =
+  var expr = self.equality()
+
+  while self.match(And):
+    let
+      operator = self.previous()
+      right = self.equality()
+    expr = Expression(kind: Logical, lleft: expr, loperator: operator, lright: right)
+
+  return expr
+
+proc lor(self: Parser): Expression =
+  var expr = self.land()
+
+  while self.match(Or):
+    let 
+      operator = self.previous()
+      right = self.land()
+    expr = Expression(kind: Logical, lleft: expr, loperator: operator, lright: right)
+
+  return expr
+
 proc assignment(self: Parser): Expression =
-  let expr = self.equality()
+  let expr = self.lor()
 
   if self.match(Equal):
     let 
@@ -242,12 +281,27 @@ proc blockStatement(self: Parser): Statement =
   self.consume(RightBrace, "Expect } after block")
   return Statement(kind:skBlock, statements: statements)
 
-proc statement(self: Parser): Statement =
-  if self.match(Print):
-    return self.printStatement()
-  if self.match(LeftBrace):
-    return self.blockStatement()
-  self.expressionStatement()
+proc statement(self: Parser): Statement
+
+proc ifStatement(self: Parser): Statement =
+  self.consume(LeftParen, "Expect ( after if")
+  let condition = self.expression()
+  self.consume(RightParen, "Expect ) after if condition")
+
+  let thenBranch = self.statement()
+  var elseBranch: Statement
+  if self.match(Else):
+    elseBranch = self.statement()
+
+  Statement(kind: skIf, condition: condition, thenBranch: thenBranch, elseBranch: elseBranch)
+
+proc whileStatement(self: Parser): Statement =
+  self.consume(LeftParen, "Expect ( after while")
+  let condition = self.expression()
+  self.consume(RightParen, "Expect ) after while condition")
+  let body = self.statement()
+
+  Statement(kind: skWhile, wcondition: condition, wbody: body)
 
 proc varDeclaration(self: Parser): Statement =
   let name = self.consumerReturnToken(Identifier, "Expect variable name")
@@ -257,6 +311,55 @@ proc varDeclaration(self: Parser): Statement =
     initialiser = self.expression()
   self.consume(Semicolon, "Expect ; after variable declaration")
   return Statement(kind: skVar, name: name, initialiser: initialiser)
+
+proc forStatement(self: Parser): Statement =
+  self.consume(LeftParen, "Expect ( after for")
+
+  var initialiser: Statement
+  if self.match(Semicolon):
+    initialiser = nil
+  elif self.match(Var):
+    initialiser = self.varDeclaration()
+  else:
+    initialiser = self.expressionStatement()
+
+  var condition: Expression
+  if not self.check(Semicolon):
+    condition = self.expression()
+  self.consume(Semicolon, "Expect ; after loop condition")
+
+  var increment: Expression
+  if not self.check(RightParen):
+    increment = self.expression()
+  self.consume(RightParen, "Expect ) after for clauses")
+
+  var body = self.statement()
+
+  if not increment.isNil():
+    body = Statement(kind: skBlock, statements: @[body, Statement(kind: skExpression, expr: increment)])
+
+  if condition.isNil():
+    condition = Expression(kind: Literal, value: LoxObject(kind: lokBool, boolvalue: true))
+  body = Statement(kind: skWhile, wcondition: condition, wbody: body)
+
+  if not initialiser.isNil():
+    body = Statement(kind: skBlock, statements: @[initialiser, body])
+
+  return body
+
+proc statement(self: Parser): Statement =
+  if self.match(Print):
+    return self.printStatement()
+  if self.match(LeftBrace):
+    return self.blockStatement()
+  if self.match(If):
+    return self.ifStatement()
+  if self.match(While):
+    return self.whileStatement()
+  if self.match(For):
+    return self.forStatement()
+  self.expressionStatement()
+
 
 proc declaration(self: Parser): Statement =
   try:
