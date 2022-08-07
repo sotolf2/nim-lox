@@ -7,6 +7,7 @@ import
 type
   ExpressionKind* = enum
     Assign,
+    Call,
     Binary,
     Grouping,
     Literal,
@@ -36,12 +37,18 @@ type
     of Assign:
       aName*: Token
       aValue*: Expression
+    of Call:
+      callee*: Expression
+      paren*: Token
+      arguements*: seq[Expression]
 
   StatementKind* = enum
     skBlock,
     skExpression,
+    skFun,
     skIf,
     skPrint,
+    skReturn,
     skVar,
     skWhile
 
@@ -49,6 +56,10 @@ type
     case kind*: StatementKind
     of skBlock:
       statements*: seq[Statement]
+    of skFun:
+      fName*: Token
+      fParams*: seq[Token]
+      fbody*: seq[Statement]
     of skExpression:
       expr*: Expression
     of skIf:
@@ -57,6 +68,9 @@ type
       elseBranch*: Statement
     of skPrint:
       pexpr*: Expression
+    of skReturn:
+      keyword*: Token
+      rValue*: Expression
     of skVar:
       name*: Token
       initialiser*: Expression 
@@ -77,6 +91,7 @@ proc `$`*(self: Expression): string =
   of Unary: fmt"({self.uOperator.lexeme} {self.uRight})"
   of Variable: $self.name
   of Assign: fmt"(assign {self.aName} {self.aValue})"
+  of Call: fmt"(call {self.callee} {self.arguements})"
 
 proc `$`*(self: Statement): string =
   case self.kind:
@@ -86,6 +101,8 @@ proc `$`*(self: Statement): string =
   of skVar: fmt"(var {self.name} {self.initialiser})"
   of skIf: fmt"(if {self.condition} {self.thenBranch} {self.elseBranch})"
   of skWhile: fmt"(while {self.wcondition} {self.wbody})"
+  of skFun: fmt"(defn {self.fName} {self.fParams} {self.fBody})"
+  of skReturn: fmt"(return {self.rValue})"
 
 proc newParser*(tokens: seq[Token]): Parser =
   result = new(Parser)
@@ -174,6 +191,28 @@ proc primary(self: Parser): Expression =
   error(self.peek, "Expect expression.")
   raise newException(ParseException, "Expect expression.")
 
+proc finishCall(self: Parser, callee: Expression): Expression =
+  var arguements: seq[Expression] = @[]
+  if not self.check(RightParen):
+    while true:
+      if arguements.len >= 255:
+        error(self.peek, "Can't have more than 255 arguements")
+      arguements.add(self.expression())
+      if not self.match(Comma):
+        break
+  let token = self.consumerReturnToken(RightParen, "Expect ) after arguements")
+
+  Expression(kind: Call, callee: callee, paren: token, arguements: arguements)
+
+proc call(self: Parser): Expression =
+  result = self.primary()
+
+  while true:
+    if self.match(LeftParen):
+      result = self.finishCall(result)
+    else:
+      break
+
 proc unary(self: Parser): Expression =
   if self.match(Bang, Minus):
     let
@@ -181,7 +220,7 @@ proc unary(self: Parser): Expression =
       right = self.unary()
     return Expression(kind: Unary, uOperator: operator, uRight: right)
 
-  self.primary()
+  self.call()
 
 proc factor(self: Parser): Expression =
   result = self.unary()
@@ -312,6 +351,31 @@ proc varDeclaration(self: Parser): Statement =
   self.consume(Semicolon, "Expect ; after variable declaration")
   return Statement(kind: skVar, name: name, initialiser: initialiser)
 
+proc function(self: Parser, kind: string): Statement =
+  let name: Token = self.consumerReturnToken(Identifier, fmt"Expect {kind} name.")
+  self.consume(LeftParen, fmt"Expect ( after {kind} name.")
+  var parameters: seq[Token] = @[]
+  if not self.check(RightParen):
+    while true:
+      if parameters.len >= 255:
+        error(self.peek, "Can't have more than 255 parameters")
+      parameters.add(self.consumerReturnToken(Identifier, "Expect parameter name"))
+      if not self.match(Comma):
+        break
+  self.consume(RightParen, "Expect ) after parameter")
+
+  self.consume(LeftBrace, fmt"Expect {{ after {kind} body.")
+  let body: seq[Statement] = self.blockStatement().statements
+  return Statement(kind: skFun, fname: name, fParams: parameters, fBody: body)
+
+proc returnStatement(self: Parser): Statement =
+  let keyword = self.previous
+  var value: Expression 
+  if not self.check(Semicolon):
+    value = self.expression()
+  self.consume(Semicolon, "Expect ; after return value")
+  return Statement(kind: skReturn, keyword: keyword, rValue: value)
+
 proc forStatement(self: Parser): Statement =
   self.consume(LeftParen, "Expect ( after for")
 
@@ -347,9 +411,13 @@ proc forStatement(self: Parser): Statement =
 
   return body
 
+
+
 proc statement(self: Parser): Statement =
   if self.match(Print):
     return self.printStatement()
+  if self.match(Return):
+    return self.returnStatement()
   if self.match(LeftBrace):
     return self.blockStatement()
   if self.match(If):
@@ -363,6 +431,8 @@ proc statement(self: Parser): Statement =
 
 proc declaration(self: Parser): Statement =
   try:
+    if self.match(Fun):
+      return self.function("function")
     if self.match(Var):
       return self.varDeclaration
     return self.statement()
